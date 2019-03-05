@@ -1,0 +1,180 @@
+---
+title: "415 Project"
+author: "Meixi Sun"
+date: "4/1/2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(MASS)
+library(FNN)
+library(tree)
+library(randomForest)
+#library(gbm)
+library(ggplot2)
+library(klaR)
+```
+
+
+```{r 0, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+set.seed(22)
+wine_quality=read.csv('winequality-red.csv')
+train_id=sample(1:nrow(wine_quality),size = trunc(0.8*nrow(wine_quality)))
+wine_train=wine_quality[train_id,]
+wine_test=wine_quality[-train_id,]
+```
+
+#Classification
+
+```{r, fig.height=12, fig.width=14}
+library(reshape2)
+cor_wine <- round(cor(wine_quality), 2)
+melted_corwine <- melt(cor_wine)
+ggplot(data = melted_corwine, aes(x = Var1, y = Var2, fill = value)) + 
+  geom_tile()
+```
+##Categoricalize the response variable
+```{r 2.1, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+wine_train$quality[which(wine_train$quality==3 | wine_train$quality==4)]=-1
+wine_train$quality[which(wine_train$quality==5 | wine_train$quality==6)]=0
+wine_train$quality[which(wine_train$quality==7 | wine_train$quality==8)]=1
+wine_test$quality[which(wine_test$quality==3 | wine_test$quality==4)]=-1
+wine_test$quality[which(wine_test$quality==5 | wine_test$quality==6)]=0
+wine_test$quality[which(wine_test$quality==7 | wine_test$quality==8)]=1
+wine_quality$quality[which(wine_quality$quality==3 | wine_quality$quality==4)]=-1
+wine_quality$quality[which(wine_quality$quality==5 | wine_quality$quality==6)]=0
+wine_quality$quality[which(wine_quality$quality==7 | wine_quality$quality==8)]=1
+```
+
+##LDA
+```{r 2.2, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+wine_lda = lda(quality ~ alcohol+sulphates+volatile.acidity+total.sulfur.dioxide+density+chlorides+pH, data = wine_train)
+
+train_pred = predict(wine_lda, wine_train)$class
+test_pred= predict(wine_lda, wine_test)$class
+calc_class_err = function(actual, predicted) { 
+  mean(actual != predicted) 
+}
+(train_lda=calc_class_err(predicted = train_pred, actual = wine_train$quality))
+(test_lda=calc_class_err(predicted = test_pred, actual = wine_test$quality))
+```
+
+##QDA
+```{r 2.3, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+wine_qda = qda(quality ~ alcohol+sulphates+volatile.acidity+total.sulfur.dioxide+density+chlorides+pH, data = wine_train)
+
+train_pred = predict(wine_qda, wine_train)$class
+test_pred= predict(wine_qda, wine_test)$class
+calc_class_err = function(actual, predicted) { 
+  mean(actual != predicted) 
+}
+(train_qda=calc_class_err(predicted = train_pred, actual = wine_train$quality))
+(test_qda=calc_class_err(predicted = test_pred, actual = wine_test$quality))
+```
+
+##KNN
+```{r 2.4, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+set.seed(22)
+X_train=wine_train[c('alcohol','sulphates','volatile.acidity','total.sulfur.dioxide','density','chlorides','pH')]
+Y_train=wine_train$quality
+X_test=wine_test[c('alcohol','sulphates','volatile.acidity','total.sulfur.dioxide','density','chlorides','pH')]
+Y_test=wine_test$quality
+K=c(1:10,20,30,40,50,60,70,80)
+n=length(K)
+train_error=rep(x = 0, times =n)
+test_error = rep(x = 0, times =n)
+for (i in 1:n) {
+  predicted_1=knn(train=X_train,test=X_train,cl=Y_train,k=K[i])
+  train_error[i]=mean(Y_train!=predicted_1)
+}
+plot(train_error~K, type = "b", lwd = 2, col = "blue",main = "Training Error vs K", xlab = "K", ylab = "Training Error",pch=19)
+(k_selected_train=K[which.min(train_error)])
+(train_knn=min(train_error))
+
+for(x in 1:n){
+  predicted_2 <- knn(train = X_train, test = X_test, cl = Y_train, k = K[x])
+  test_error[x] <- mean(Y_test != predicted_2)
+}
+
+plot(test_error~K, type = "b", lwd = 2, col = "orange",main = "Test Error vs K", xlab = "K", ylab = "Test Error",pch=19,cex = 1)
+(k_selected_test=K[which.min(test_error)])
+(test_knn=min(test_error))
+```
+
+##Classification Tree
+```{r 2.5, fig.height=5, fig.width=11, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+set.seed(22)
+wine_train$quality=as.factor(wine_train$quality)
+wine_test$quality=as.factor(wine_test$quality)
+tree_wine=tree(quality ~alcohol+sulphates+volatile.acidity+total.sulfur.dioxide+density+chlorides+pH, data = wine_train)
+cv_tree=cv.tree(tree_wine, FUN = prune.misclass)
+plot(cv_tree$size,cv_tree$dev,xlab = 'size',ylab='error', type = 'b')
+prune_tree_wine=prune.misclass(tree_wine,best=4)
+tree_train=predict(prune_tree_wine,wine_train,type = 'class')
+(train_tree=mean(tree_train != wine_train$quality))
+tree_test=predict(prune_tree_wine,wine_test,type = 'class')
+(test_tree=mean(tree_test != wine_test$quality))
+plot(tree_wine)
+text(tree_wine, pretty = 0)
+```
+
+##Random Forest
+```{r 2.6, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+set.seed(22)
+forest_wine=randomForest(quality~alcohol+sulphates+volatile.acidity+total.sulfur.dioxide+density+chlorides+pH, data = wine_train,mtry=3,ntree=1000, importance=T)
+forest_train=predict(forest_wine,wine_train,type = 'class')
+(train_forest=mean(forest_train != wine_train$quality))
+forest_test=predict(forest_wine,wine_test,type = 'class')
+(test_forest=mean(forest_test != wine_test$quality))
+```
+
+##Bagging
+```{r 2.7, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+set.seed(22)
+bagging_wine=randomForest(quality~alcohol+sulphates+volatile.acidity+total.sulfur.dioxide+density+chlorides+pH, data = wine_train,mtry=7,ntree=1000, importance=T)
+bagging_train=predict(bagging_wine,wine_train,type = 'class')
+(train_bagging=mean(bagging_train != wine_train$quality))
+bagging_test=predict(bagging_wine,wine_test,type = 'class')
+(test_bagging=mean(bagging_test != wine_test$quality))
+```
+
+
+| Method        | Training error         | Test error  |
+| ------------- |:-------------:| -----:|
+| LDA      | 0.1532447  | 0.171875 |
+| QDA       | 0.1759187      |   0.196875 |
+| KNN  | 0      |    0.184375 |
+| Classification Tree  | 0.1501173      |    0.1875 |
+| Random Forest  | 0      |    0.146875 |
+| Bagging  | 0      |    0.153125 |
+
+```{r 2.8, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+ggplot(data=wine_quality, aes(x=quality),col="red") + geom_histogram(aes(fill=..count..), binwidth = 1)
+```
+
+```{r}
+par(2, 3)
+ggplot(data = wine_quality) +
+  geom_boxplot(mapping = aes(x = quality, y = alcohol, group = quality,
+                             fill = quality))
+ggplot(data = wine_quality) +
+  geom_boxplot(mapping = aes(x = quality, y = volatile.acidity, group = quality, 
+                             fill = quality))
+ggplot(data = wine_quality) +
+  geom_boxplot(mapping = aes(x = quality, y = sulphates, group = quality, 
+                             fill = quality))
+ggplot(data = wine_quality) +
+  geom_boxplot(mapping = aes(x = quality, y = total.sulfur.dioxide, 
+                             group = quality, fill = quality))
+ggplot(data = wine_quality) +
+  geom_boxplot(mapping = aes(x = quality, y = chlorides, group = quality, 
+                             fill = quality))
+ggplot(data = wine_quality) +
+  geom_boxplot(mapping = aes(x = quality, y = pH, group = quality, fill = quality))
+ggplot(data = wine_quality) +
+  geom_boxplot(mapping = aes(x = quality, y = residual.sugar, group = quality, fill = quality))
+
+ggplot(data = wine_quality) +
+  geom_boxplot(mapping = aes(x = quality, y = density, group = quality, fill = quality))
+```
